@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: photo-openai-telegram-bot
+
+app:
+  telegram:
+    token:
+    enabled: true
+    long-poll-timeout: 30s
+  openai:
+    api-key:
+    image-model: gpt-image-1.5
+    image-size: auto
+    input-fidelity: high
