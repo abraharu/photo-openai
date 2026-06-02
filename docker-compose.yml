@@ -1,0 +1,12 @@
+services:
+  pixelwish-bot:
+    build:
+      context: .
+    image: pixelwish-bot:local
+    container_name: pixelwish-bot
+    env_file:
+      - .env
+    environment:
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=65 -XX:InitialRAMPercentage=10 -XX:+UseSerialGC -XX:MaxDirectMemorySize=64m -Djava.security.egd=file:/dev/urandom"
+    restart: unless-stopped
+    mem_limit: 384m

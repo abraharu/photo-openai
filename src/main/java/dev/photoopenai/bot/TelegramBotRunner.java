@@ -11,6 +11,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -24,13 +25,28 @@ import java.util.concurrent.atomic.AtomicLong;
 public class TelegramBotRunner implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(TelegramBotRunner.class);
     private static final String HELP = """
-            Привет! Отправь фото с подписью, что нужно изменить.
+            PixelWish редактирует фото по твоему описанию.
 
-            Можно и так: сначала фото, потом отдельным сообщением задачу для редактирования.
+            Как пользоваться:
+            1. Отправь фото.
+            2. В подписи к фото напиши, что изменить.
+
+            Можно иначе:
+            1. Отправь фото без подписи.
+            2. Следующим сообщением отправь задачу.
+
+            Примеры задач:
+            Убери фон и сделай студийный свет.
+            Сделай фото в стиле делового портрета.
+            Замени фон на город ночью.
+
+            Команды:
+            /help - показать эту инструкцию
             /clear - забыть последнее фото
             """;
-    private static final String WAITING_FOR_PROMPT = "Фото получил. Теперь отправь текстом, что нужно отредактировать.";
-    private static final String WORKING = "Принял, редактирую фото. Это может занять до пары минут.";
+    private static final String WAITING_FOR_PROMPT = "Фото получил. Теперь отправь текстом, что нужно изменить.";
+    private static final String WORKING = "Фото принято. Начал обработку, это может занять несколько минут. Результат пришлю сюда.";
+    private static final String UPLOAD_PHOTO_ACTION = "upload_photo";
 
     private final TelegramProperties telegramProperties;
     private final TelegramClient telegramClient;
@@ -129,14 +145,28 @@ public class TelegramBotRunner implements ApplicationRunner {
 
     private Mono<Void> editAndReply(long chatId, String fileId, String prompt) {
         return telegramClient.sendMessage(chatId, WORKING)
-                .then(telegramClient.getFile(fileId))
-                .flatMap(file -> telegramClient.downloadFile(file.filePath())
-                        .flatMap(bytes -> openAiImageClient.editImage(bytes, contentTypeFrom(file.filePath()), prompt)))
+                .then(withUploadProgress(chatId, telegramClient.getFile(fileId)
+                        .flatMap(file -> telegramClient.downloadFile(file.filePath())
+                                .flatMap(bytes -> openAiImageClient.editImage(bytes, contentTypeFrom(file.filePath()), prompt)))))
                 .flatMap(result -> telegramClient.sendPhoto(chatId, result, "edited.png", "Готово"))
                 .onErrorResume(error -> {
                     log.warn("Image edit failed for chat {}: {}", chatId, error.getMessage(), error);
                     return telegramClient.sendMessage(chatId, "Не получилось отредактировать фото: " + userSafeMessage(error));
                 });
+    }
+
+    private <T> Mono<T> withUploadProgress(long chatId, Mono<T> work) {
+        Mono<T> sharedWork = work.cache();
+        Mono<Void> progress = Flux.interval(Duration.ZERO, Duration.ofSeconds(4))
+                .flatMap(tick -> telegramClient.sendChatAction(chatId, UPLOAD_PHOTO_ACTION)
+                        .onErrorResume(error -> {
+                            log.debug("Could not send Telegram chat action for chat {}: {}", chatId, error.getMessage());
+                            return Mono.empty();
+                        }))
+                .takeUntilOther(sharedWork.then())
+                .then();
+
+        return Mono.when(progress, sharedWork).then(sharedWork);
     }
 
     private void advanceOffset(List<Update> updates) {

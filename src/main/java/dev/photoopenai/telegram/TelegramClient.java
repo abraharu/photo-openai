@@ -77,6 +77,18 @@ public class TelegramClient {
                 .then();
     }
 
+    public Mono<Void> sendChatAction(long chatId, String action) {
+        return apiClient.post()
+                .uri("/sendChatAction")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(new SendChatActionRequest(chatId, action))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<TelegramResponse<Object>>() {
+                })
+                .map(this::requireOk)
+                .then();
+    }
+
     public Mono<Void> sendPhoto(long chatId, byte[] imageBytes, String filename, String caption) {
         MultipartBodyBuilder body = new MultipartBodyBuilder();
         body.part("chat_id", Long.toString(chatId));
@@ -104,6 +116,12 @@ public class TelegramClient {
     }
 
     private record SendMessageRequest(@com.fasterxml.jackson.annotation.JsonProperty("chat_id") long chatId, String text) {
+    }
+
+    private record SendChatActionRequest(
+            @com.fasterxml.jackson.annotation.JsonProperty("chat_id") long chatId,
+            String action
+    ) {
     }
 
     private static final class NamedByteArrayResource extends ByteArrayResource {
